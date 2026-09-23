@@ -24,10 +24,40 @@ function writeHidden(hidden: Set<string>): void {
   fs.writeFileSync(bridgePath(), JSON.stringify({ hidden: [...hidden].sort() }, null, 2) + "\n");
 }
 
+// Temporary debug helper: capture the real CLI context shape so the plugin can
+// adapt to the API of the installed OpenCode version. Remove once the selector
+// is verified end-to-end.
+function dumpShape(context: unknown): void {
+  try {
+    const ctx = context as Record<string, unknown>;
+    const shape: Record<string, string> = {};
+    for (const [key, value] of Object.entries(ctx)) {
+      shape[key] =
+        typeof value === "object" && value !== null
+          ? Object.keys(value).join(",")
+          : String(typeof value);
+    }
+    fs.mkdirSync("/tmp/opencode", { recursive: true });
+    fs.writeFileSync("/tmp/opencode/cli-context-shape.json", JSON.stringify(shape, null, 2));
+  } catch {
+    // Diagnostics must not break the plugin.
+  }
+}
+
 export default Plugin.define({
   id: "model-hide.tui",
   setup(context) {
-    context.keymap.layer(() => ({
+    dumpShape(context);
+    const ctx = context as {
+      ui?: unknown;
+      keymap?: { layer: (fn: () => unknown) => unknown };
+    };
+
+    if (!ctx.keymap || typeof ctx.keymap.layer !== "function") {
+      return;
+    }
+
+    ctx.keymap.layer(() => ({
       mode: "global",
       priority: 10,
       commands: [
