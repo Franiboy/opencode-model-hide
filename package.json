@@ -1,6 +1,6 @@
 {
   "name": "@franiboy/opencode-model-hide",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "description": "OpenCode plugin: hide models from the picker with an in-TUI selector",
   "type": "module",
   "license": "MIT",
@@ -9,7 +9,12 @@
     "type": "git",
     "url": "git+https://github.com/Franiboy/opencode-model-hide.git"
   },
-  "keywords": ["opencode", "opencode-plugin", "models", "tui"],
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "models",
+    "tui"
+  ],
   "exports": {
     ".": "./src/index.ts",
     "./tui": "./src/tui.ts"
@@ -17,5 +22,9 @@
   "dependencies": {
     "@opencode/plugin": "^2.0.15"
   },
-  "files": ["src", "README.md", "LICENSE"]
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ]
 }

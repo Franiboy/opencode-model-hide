@@ -43,7 +43,7 @@ export default Plugin.define({
     };
     lastSig = sig();
 
-    fs.watchFile(BRIDGE_FILE, { interval: 1500 }, () => {
+    fs.watchFile(bridgePath(), { interval: 1500 }, () => {
       const next = sig();
       if (next === lastSig) return;
       lastSig = next;
