@@ -1,56 +1,40 @@
 # opencode-model-hide
 
-OpenCode plugin (single file, server-side): hides models from the model picker.
+OpenCode plugin that lets you hide models from the model picker — managed entirely
+from the terminal UI with a picker-style selection dialog, no config editing required.
 
-## Installation
+- `/model-hide` (or `Ctrl+Shift+h`): open the model list, arrow-key through it, and
+  press Enter to toggle the highlighted model between hidden and visible.
+- Server side, hidden models are removed from the active model catalog, so they
+  disappear from `opencode models`, `/models`, and every OpenCode instance for the
+  user account — across restarts and catalog refreshes.
+- Everything else (other providers, other models) is left untouched.
 
-## Installation
-
-No npm install of plugin packages is needed — it ships as one TypeScript file.
-
-```bash
-# project-local (the "directly in the project" approach):
-mkdir -p .opencode/plugins
-curl -L -o .opencode/plugins/model-hide.ts \
-  https://github.com/Franiboy/opencode-model-hide/raw/main/model-hide.ts
-```
-
-Optionally ignore it in the project's `.gitignore`:
-
-```
-.opencode/plugins/model-hide.ts
-```
-
-The user-directory variant also works (verified):
+## Install
 
 ```bash
-curl -L -o ~/.config/opencode/plugins/model-hide.ts \
-  https://github.com/Franiboy/opencode-model-hide/raw/main/model-hide.ts
+npm install @franiboy/opencode-model-hide
 ```
 
-> **Symlinks are not reliable here.** OpenCode 2.0.15 fails to resolve a symlinked
-> plugin file (`Cannot find module ... from ''`) and silently skips it. Use a real
-> copy or a copy step in your dotfiles workflow instead.
+Then reference it like any OpenCode plugin:
 
-Keep the source in the git-working copy (`~/git/opencode-model-hide`) and link it —
-same setup as this repository.
+```jsonc title="opencode.jsonc"
+{
+  "plugins": ["@franiboy/opencode-model-hide"]
+}
+```
 
-## What it does
+For the TUI part (the in-terminal selector), also configure the terminal client:
 
-- The model selection filter is persisted to `~/.config/opencode/model-hide.json`.
-- Every hidden entry removes the matching OpenCode model from the picker.
-- List entries look like `provider/model-id`; filtering is a plain string match.
+```jsonc title="~/.config/opencode/cli.json"
+{
+  "plugins": ["@franiboy/opencode-model-hide"]
+}
+```
 
-The plan is: JSON `{"hidden": ["provider/model", ...]}`, nothing else.
+## Bridge file
 
-- The plugin watches that bridge file (1.5 s poll) and requests `ctx.model.reload()`
-  automatically, so changes apply without a server restart.
-- `MODEL_HIDE_BRIDGE_FILE` environment variable can move the bridge location.
-
-## Usage
-
-Edit `~/.config/opencode/model-hide.json` (locally also relocated via environment
-variable):
+Hidden models are stored in `~/.config/opencode/model-hide.json`:
 
 ```json
 {
@@ -58,8 +42,15 @@ variable):
 }
 ```
 
-Changes are picked up automatically and OpenCode's model picker updates — you'll see
-them disappear from `/models` and `opencode models` while everything else stays.
+- Changes are picked up automatically (1.5s watch, `ctx.model.reload()`).
+- `MODEL_HIDE_BRIDGE_FILE` can move the file location.
+
+## Standalone, without the plugin packages
+
+The server-side filter ships as a single self-contained file suitable for the
+`.opencode/plugins/` approach (symlinks do not load; use a real copy):
+
+- https://github.com/Franiboy/opencode-model-hide/blob/main/model-hide.ts
 
 ## License
 
