@@ -1,6 +1,6 @@
 {
   "name": "@franiboy/opencode-model-hide",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "OpenCode plugin: hide models from the picker with an in-TUI selector",
   "type": "module",
   "license": "MIT",
