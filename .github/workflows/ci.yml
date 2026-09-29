@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch makes the older run irrelevant.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: check (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22", "24"]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # prettier --check fails on any formatting drift.
+      - name: Format
+        run: npm run format:check
+
+      # The package ships raw TypeScript, so the strict typecheck is the only
+      # thing standing between a broken build and every install of the plugin.
+      # It runs against the resolved @opencode/plugin, which is what makes a
+      # breaking plugin-API change visible here instead of in a bug report.
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm run test
+
+  # Proves the published tarball contains what package.json promises and
+  # nothing else. A wrong `files` entry would ship the test fixtures.
+  pack:
+    name: npm pack contents
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Verify tarball
+        run: |
+          npm pack --dry-run --json > pack.json
+          node -e '
+            const files = require("./pack.json")[0].files.map((f) => f.path).sort();
+            const problems = [];
+            // Nothing outside the three declared "files" entries may ship.
+            for (const f of files) {
+              if (f === "package.json" || f === "README.md" || f === "LICENSE" || f.startsWith("src/")) continue;
+              problems.push("unexpected entry: " + f);
+            }
+            // Both entrypoints named in package.json "exports" must be present.
+            for (const required of ["src/index.ts", "src/tui.ts"]) {
+              if (!files.includes(required)) problems.push("missing entrypoint: " + required);
+            }
+            if (problems.length) {
+              console.error("npm pack contents wrong:\n  " + problems.join("\n  ") + "\n\nactual:\n  " + files.join("\n  "));
+              process.exit(1);
+            }
+            console.log("tarball contents ok: " + files.join(", "));
+          '

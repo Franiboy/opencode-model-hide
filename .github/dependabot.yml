@@ -1,0 +1,22 @@
+version: 2
+
+updates:
+  # The plugin targets @opencode/plugin, which is where its whole type surface
+  # comes from. CI typechecks against the resolved version, so a breaking
+  # release turns the check red on the Dependabot PR instead of reaching users.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        patterns: ["*"]
+        exclude-patterns: ["@opencode/plugin"]
+    labels: [dependencies]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels: [dependencies, ci]
