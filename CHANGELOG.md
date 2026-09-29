@@ -14,6 +14,14 @@ entry and no warning. Keeping the section current is the author's job.
 
 ## [Unreleased]
 
+### Fixed
+
+- `npm run release` no longer reports a successful publish as a failure. npm
+  answers `+ pkg@version` before the registry has finished processing, so
+  reading `dist-tags.latest` immediately saw the previous version. Measured on
+  0.1.6: published at 16:34, dist-tag caught up around 16:38. The script now
+  waits up to ten minutes.
+
 ## [0.1.6] - 2026-09-29
 
 This release was prepared on 2026-09-24 and then sat committed but unpublished
