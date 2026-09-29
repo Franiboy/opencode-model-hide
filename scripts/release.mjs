@@ -21,8 +21,10 @@ import path from "node:path";
 import readline from "node:readline";
 import url from "node:url";
 import {
-  buildCandidates,
+  buildReleaseCandidates,
   compareSemver,
+  findReleaseSection,
+  hasVersionLink,
   parseSemver,
   resolveChoice,
   suggestKind,
@@ -49,6 +51,10 @@ function step(message) {
   console.log(`\n==> ${message}`);
 }
 
+// Set once the working tree has been edited on purpose, so a later failure
+// restores the files instead of leaving a half applied release behind.
+let treeIsDirty = false;
+
 function run(command, commandArgs, options = {}) {
   // Never let git spawn a pager: it would sit there waiting for a keypress and
   // turn the script into a hang.
@@ -63,6 +69,16 @@ function run(command, commandArgs, options = {}) {
     if (options.capture) {
       console.error(res.stdout ?? "");
       console.error(res.stderr ?? "");
+    }
+    if (treeIsDirty && options.restoreOnFailure !== false) {
+      console.log("\n==> restoring the working tree");
+      run(
+        "git",
+        ["checkout", "--", "package.json", "package-lock.json", "CHANGELOG.md"],
+        {
+          allowFailure: true,
+        },
+      );
     }
     die(`${command} ${commandArgs.join(" ")} failed with exit ${res.status}`);
   }
@@ -127,17 +143,30 @@ if (!pending) {
 
 // --------------------------------------------------------------- suggestions
 
-async function chooseVersion() {
-  const suggested = suggestKind(current, pending);
-  const candidates = buildCandidates(current);
+async function chooseVersion(publishedLatest) {
+  const { candidates, ahead } = buildReleaseCandidates(
+    current,
+    publishedLatest,
+  );
+  // When package.json is ahead of npm, the prepared version is what almost
+  // always gets released, so it is recommended regardless of the changelog.
+  const suggestedKind = ahead ? "prepared" : suggestKind(current, pending).kind;
+  const why = ahead
+    ? `package.json is ahead of npm (${publishedLatest} is the newest published version)`
+    : suggestKind(current, pending).why;
   const recommendedIndex = candidates.findIndex(
-    (c) => c.kind === suggested.kind,
+    (c) => c.kind === suggestedKind,
   );
 
-  console.log(`\n  ${PKG_NAME} is at ${current}.\n`);
-  console.log(`  From CHANGELOG.md: ${suggested.why}\n`);
+  console.log(`\n  ${PKG_NAME} is at ${current} in package.json.\n`);
+  if (ahead) {
+    console.log(
+      `  npm's newest published version is ${publishedLatest}, so ${current} is still\n  waiting to be published.\n`,
+    );
+  }
+  console.log(`  From CHANGELOG.md: ${why}\n`);
   for (const [i, candidate] of candidates.entries()) {
-    const mark = candidate.kind === suggested.kind ? "  <- suggested" : "";
+    const mark = candidate.kind === suggestedKind ? "  <- suggested" : "";
     console.log(
       `    ${i + 1})  ${candidate.version.padEnd(9)} ${candidate.label}${mark}`,
     );
@@ -180,11 +209,64 @@ async function chooseVersion() {
   die("too many invalid answers, aborting");
 }
 
-const next = requested ?? (await chooseVersion());
+// ------------------------------------------------------------------- npm side
+
+// Read before the prompt: when package.json is ahead of the registry the
+// candidate list has to include the prepared version, and that cannot be known
+// without asking npm first.
+step("npm registry");
+const view = capture("npm", ["view", PKG_NAME, "versions", "--json"]);
+if (view.status !== 0) {
+  console.error(view.stdout ?? "");
+  console.error(view.stderr ?? "");
+  die("could not read the published versions from npm");
+}
+let published;
+try {
+  published = JSON.parse(view.stdout);
+} catch {
+  // npm answers `null` for a package with no versions at all
+  published = [];
+}
+if (!Array.isArray(published)) published = [];
+const semverOnly = published.filter((v) => parseSemver(v));
+const publishedLatest = semverOnly
+  .sort((a, b) => compareSemver(parseSemver(a), parseSemver(b)))
+  .at(-1);
+console.log(
+  `  published: ${published.length} version(s), latest ${publishedLatest ?? "(none)"}`,
+);
+
+const next = requested ?? (await chooseVersion(publishedLatest));
 const nextSemver = parseSemverOrDie(next, "version");
 
-if (compareSemver(nextSemver, currentSemver) <= 0) {
-  die(`version ${next} must be greater than the current ${current}`);
+if (published.includes(next)) {
+  die(`version ${next} is already published on npm`);
+}
+
+// `package.json` may already name the version that never made it to npm - that
+// is exactly the state 0.1.6 sat in for five days. Re-releasing the version
+// that is already in `package.json` is therefore legitimate, going backwards is
+// not.
+if (compareSemver(nextSemver, currentSemver) < 0) {
+  die(
+    `version ${next} is lower than the current ${current}.\n` +
+      `     package.json already names ${current}; releasing a lower version would\n` +
+      `     move it backwards.`,
+  );
+}
+
+// 0.1.6 sat committed but unpublished for days, which left a `## [0.1.6]`
+// section in the changelog for a version that never reached npm. Releasing
+// 0.1.6 again would have produced two headings of the same name and two link
+// references. Folding that section into Unreleased is a judgement call, so the
+// script stops instead of guessing.
+if (findReleaseSection(changelog, next)) {
+  die(
+    `CHANGELOG.md already has a "## [${next}]" section.\n` +
+      `     Fold it into ## [Unreleased] first - it was written for a version that\n` +
+      `     never reached npm. Then run the release again.`,
+  );
 }
 
 // ---------------------------------------------------------- repository state
@@ -222,32 +304,6 @@ if (capture("git", ["tag", "-l", `v${next}`]).stdout.trim()) {
 const latestTag = capture("git", ["tag", "--list", "v*", "--sort=-v:refname"])
   .stdout.split("\n")
   .filter(Boolean)[0];
-
-// ------------------------------------------------------------------- npm side
-
-step("npm registry");
-const view = capture("npm", ["view", PKG_NAME, "versions", "--json"]);
-if (view.status !== 0) {
-  console.error(view.stdout ?? "");
-  console.error(view.stderr ?? "");
-  die("could not read the published versions from npm");
-}
-let published;
-try {
-  published = JSON.parse(view.stdout);
-} catch {
-  // npm answers `null` for a package with no versions at all
-  published = [];
-}
-if (published.includes(next)) die(`${next} is already published on npm`);
-
-console.log(
-  `  published: ${published.length} version(s), latest tag ${
-    capture("npm", ["view", PKG_NAME, "dist-tags.latest"]).stdout.trim() ||
-    "(none)"
-  }`,
-);
-console.log(`  new:       ${next}`);
 
 // --------------------------------------------------------------------- CI gate
 
@@ -305,22 +361,42 @@ let updated = changelog.replace(
 
 // Keep the link references truthful: Unreleased now starts at the new tag, and
 // the new version gets a link from the previously released one, in the same
-// descending order as the entries already there.
+// descending order as the entries already there. Idempotent, so a hand written
+// link is never duplicated.
 const base = `https://github.com/${REPO}/compare`;
 updated = updated.replace(
   /^\[Unreleased\]:.*$/m,
-  `[Unreleased]: ${base}/v${next}...HEAD\n[${next}]: ${base}/v${previous}...v${next}`,
+  `[Unreleased]: ${base}/v${next}...HEAD`,
 );
+if (!hasVersionLink(updated, next)) {
+  updated = updated.replace(
+    /^(\[Unreleased\]:.*)$/m,
+    `$1\n[${next}]: ${base}/v${previous}...v${next}`,
+  );
+}
 fs.writeFileSync(changelogPath, updated);
+treeIsDirty = true;
 
 // ------------------------------------------------------------------ the bump
 
 step("bump version");
-run("npm", ["version", next, "--no-git-tag-version"]);
+if (compareSemver(nextSemver, currentSemver) === 0) {
+  // `npm version` refuses a no-op. The files already carry the right version,
+  // but the lockfile is not guaranteed to agree after a hand edit, so it is
+  // synced rather than assumed.
+  console.log(`  package.json already says ${next}, skipping the bump`);
+  run("npm", ["install", "--package-lock-only", "--ignore-scripts"]);
+} else {
+  run("npm", ["version", next, "--no-git-tag-version"]);
+}
 
 // ---------------------------------------------------------------- transaction
 
 const TOUCHED = ["package.json", "package-lock.json", "CHANGELOG.md"];
+
+function restoreFiles() {
+  run("git", ["checkout", "--", ...TOUCHED], { allowFailure: true });
+}
 
 function rollback() {
   console.log("\n==> rolling back commit and tag");
@@ -336,7 +412,7 @@ if (dryRun) {
   console.log("\n--- git diff ---");
   run("git", ["diff", "--", ...TOUCHED]);
   console.log("\n==> restoring the working tree");
-  run("git", ["checkout", "--", ...TOUCHED]);
+  restoreFiles();
   run("git", ["status", "--short"]);
   console.log(
     `  HEAD is still ${capture("git", ["rev-parse", "--short", "HEAD"]).stdout.trim()}, ` +
@@ -345,44 +421,58 @@ if (dryRun) {
   process.exit(0);
 }
 
-step("commit and tag");
-run("git", ["add", ...TOUCHED]);
-run("git", ["commit", "-m", `Release v${next}`]);
-run("git", ["tag", "-a", `v${next}`, "-m", `${PKG_NAME} v${next}`]);
+// From here on the working tree is dirty by design. `die` must therefore also
+// undo the file edits, otherwise a failure between the changelog write and the
+// commit leaves a half applied release behind - which is what happened when
+// `npm version` refused a no-op bump.
+let committed = false;
 
-// Publish before pushing: if this fails, nothing has left the machine.
-step(`publish ${next} to npm`);
-const publish = capture("npm", ["publish"]);
-if (publish.status !== 0) {
-  console.error(publish.stdout ?? "");
-  console.error(publish.stderr ?? "");
-  rollback();
-  die(
-    "npm publish failed, nothing was pushed. main is unchanged.\n" +
-      "     (The npm account has 2FA on writes: open the printed URL, then rerun.)",
+try {
+  step("commit and tag");
+  run("git", ["add", ...TOUCHED]);
+  run("git", ["commit", "-m", `Release v${next}`]);
+  run("git", ["tag", "-a", `v${next}`, "-m", `${PKG_NAME} v${next}`]);
+  committed = true;
+  treeIsDirty = false;
+
+  // Publish before pushing: if this fails, nothing has left the machine.
+  step(`publish ${next} to npm`);
+  const publish = capture("npm", ["publish"]);
+  if (publish.status !== 0) {
+    console.error(publish.stdout ?? "");
+    console.error(publish.stderr ?? "");
+    rollback();
+    die(
+      "npm publish failed, nothing was pushed. main is unchanged.\n" +
+        "     (The npm account has 2FA on writes: open the printed URL, then rerun.)",
+    );
+  }
+
+  // The commit first, then the tag: a remote tag must never exist without its
+  // commit.
+  step("push");
+  run("git", ["push", "origin", "main"]);
+  run("git", ["push", "origin", `v${next}`]);
+
+  step("verify");
+  const latest = capture("npm", [
+    "view",
+    PKG_NAME,
+    "dist-tags.latest",
+  ]).stdout.trim();
+  if (latest !== next) {
+    die(`published, but dist-tags.latest is "${latest}" instead of "${next}"`);
+  }
+
+  console.log(`  npm latest  = ${latest}`);
+  console.log(
+    `  git tag     = ${capture("git", ["rev-parse", "--short", `v${next}^{commit}`]).stdout.trim()}`,
   );
+  console.log(
+    `  remote tag  = ${capture("git", ["ls-remote", "--tags", "origin", `v${next}`]).stdout.split("\t")[0]}`,
+  );
+  console.log(`\n==> released ${PKG_NAME}@${next}\n`);
+} catch (error) {
+  if (!committed) restoreFiles();
+  throw error;
 }
-
-// The commit first, then the tag: a remote tag must never exist without its
-// commit.
-step("push");
-run("git", ["push", "origin", "main"]);
-run("git", ["push", "origin", `v${next}`]);
-
-step("verify");
-const latest = capture("npm", [
-  "view",
-  PKG_NAME,
-  "dist-tags.latest",
-]).stdout.trim();
-if (latest !== next) {
-  die(`published, but dist-tags.latest is "${latest}" instead of "${next}"`);
-}
-console.log(`  npm latest  = ${latest}`);
-console.log(
-  `  git tag     = ${capture("git", ["rev-parse", "--short", `v${next}^{commit}`]).stdout.trim()}`,
-);
-console.log(
-  `  remote tag  = ${capture("git", ["ls-remote", "--tags", "origin", `v${next}`]).stdout.split("\t")[0]}`,
-);
-console.log(`\n==> released ${PKG_NAME}@${next}\n`);

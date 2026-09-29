@@ -230,6 +230,15 @@ describe("persisted default", () => {
 // debounce in src/index.ts. The per-test timeout has to exceed the waitFor
 // budget, otherwise the test dies at vitest's own deadline instead of
 // reporting the reload that never arrived.
+// fs.watchFile polls the bridge file every 500ms and only reports a change once
+// it has a baseline. Writing immediately after setup() can land before that
+// poll, so the edit goes unnoticed. Three intervals of headroom, because a
+// single one is not enough when the runner is loaded - which is how these tests
+// failed intermittently on CI.
+async function armWatcher(): Promise<void> {
+  await new Promise((r) => setTimeout(r, 2500));
+}
+
 describe("live reload", () => {
   it(
     "reloads the model catalog when the bridge file changes",
@@ -239,6 +248,7 @@ describe("live reload", () => {
 
       const { getReloads } = await setup();
       expect(getReloads()).toBe(0);
+      await armWatcher();
 
       fs.writeFileSync(
         bridgeFile,
@@ -253,12 +263,50 @@ describe("live reload", () => {
   );
 
   it(
+    "notices a rewrite that keeps the file size identical",
+    { timeout: 30_000 },
+    async () => {
+      // The watcher used to derive a signature from mtime:ctime:size and skip
+      // the reload when it was unchanged. Two writes inside the same
+      // millisecond that keep the length produce exactly that, and the TUI then
+      // keeps a stale model list. Measured with the two values below: 194 of
+      // 200 back-to-back rewrites collided on the metadata signature, because
+      // the file only ever holds a few dozen bytes of JSON.
+      //
+      // ctime cannot be rewound - it always tracks the write - so a genuine
+      // three-way collision cannot be staged through the filesystem. What is
+      // pinned down instead is the property the watcher now relies on: the
+      // size component of the old signature is identical here, so the reload
+      // can only come from the content.
+      const before = JSON.stringify({ hidden: ["opencode-go/grok-4.6"] });
+      const after = JSON.stringify({ hidden: ["opencode-go/opus-4.6"] });
+      expect(before.length).toBe(after.length);
+      expect(before).not.toBe(after);
+
+      fs.writeFileSync(bridgeFile, before);
+      const { getReloads } = await setup();
+      expect(getReloads()).toBe(0);
+
+      await armWatcher();
+
+      const sizeBefore = fs.statSync(bridgeFile).size;
+      fs.writeFileSync(bridgeFile, after);
+      expect(fs.statSync(bridgeFile).size).toBe(sizeBefore);
+      await vi.waitFor(() => expect(getReloads()).toBeGreaterThan(0), {
+        timeout: 20_000,
+        interval: 100,
+      });
+    },
+  );
+
+  it(
     "picks up a newly hidden model on the next transform",
     { timeout: 30_000 },
     async () => {
       writeBridge({ hidden: [] });
       const first = await setup();
       expect(first.removed).toEqual([]);
+      await armWatcher();
 
       fs.writeFileSync(
         bridgeFile,

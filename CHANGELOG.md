@@ -7,39 +7,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version in `package.json` is the single source of truth for what the next
 `npm publish` will produce.
 
+`npm run release` moves everything under `## [Unreleased]` verbatim into the new
+version's section. Nothing checks that the section actually describes what
+changed: a commit that touches `src/` without an entry here is released with no
+entry and no warning. Keeping the section current is the author's job.
+
 ## [Unreleased]
 
-### Removed
-
-- The standalone single-file variant `model-hide.ts` and the section
-  documenting it. Installation now always goes through npm. The file was
-  never part of the published package (it is not in the `files` list), so
-  this changes nothing for existing installs.
-- The `build:single` and `check:single` npm scripts, which existed only to
-  keep that file in sync with `src/index.ts`.
-
-### Changed
-
-- `src/index.ts`: the `Plugin.define()` wrapper is replaced by
-  `satisfies Plugin.Plugin`. `Plugin.define` is an identity function at
-  runtime, so this changes no behaviour, but it drops the only value import
-  from `@opencode/plugin`.
-
-### Added
-
-- Typecheck (`tsc --noEmit`, strict), Prettier and a Vitest suite covering
-  the bridge file parsing, the catalog writer, the persisted default and the
-  live reload. CI runs all three on Node 22 and 24 and asserts that the npm
-  tarball contains nothing outside `src/`, `README.md`, `LICENSE` and
-  `package.json`.
-- Dependabot, so a breaking `@opencode/plugin` release surfaces as a red CI
-  check on the upgrade PR rather than as a bug report.
-
-Removing `model-hide.ts` also disposes of a real defect: it had silently
-stayed on 0.1.5 code while the package was at 0.1.6, with none of the
-catalog or favorite handling, and it did not typecheck.
-
-## [0.1.6] - 2026-09-24
+This release was prepared on 2026-09-24 and then sat committed but unpublished
+for five days, so it also carries the tooling work that followed. Nothing from
+that first attempt ever reached npm, which is why there is only ever one
+published 0.1.6 rather than two.
 
 ### Added
 
@@ -51,6 +29,50 @@ catalog or favorite handling, and it did not typecheck.
   alone.
 - `MODEL_HIDE_CATALOG_FILE` overrides the catalog location independently of
   `MODEL_HIDE_BRIDGE_FILE`.
+- Typecheck (`tsc --noEmit`, strict), Prettier and a Vitest suite covering
+  the bridge file parsing, the catalog writer, the persisted default and the
+  live reload. CI runs all three on Node 22 and 24 and asserts that the npm
+  tarball contains nothing outside `src/`, `README.md`, `LICENSE` and
+  `package.json`.
+- Dependabot, so a breaking `@opencode/plugin` release surfaces as a red CI
+  check on the upgrade PR rather than as a bug report.
+- `npm run release` as the only way to publish: it suggests a version from the
+  Unreleased section, bumps `package.json` and `package-lock.json` together,
+  commits and tags locally, then publishes, and only then pushes. If the
+  publish fails it rolls the commit and the tag back, so `main` is never left
+  with a release that does not exist on npm.
+- A contributing rule in `README.md` and `AGENTS.md`: a change carries its
+  `## [Unreleased]` entry in the same pull request that makes it. Nothing
+  enforces this, because `npm run release` copies that section verbatim and never
+  compares it against what actually changed.
+
+### Fixed
+
+- The bridge-file watcher no longer misses a change that keeps the file size the
+  same. It compared `mtime:ctime:size` and skipped the reload when that
+  signature was unchanged; because the bridge file holds a few dozen bytes of
+  JSON, two writes in the same millisecond collide on it (194 of 200 in a
+  measured loop). Hiding one model in exchange for another of equal length
+  silently did nothing and the TUI kept the stale list. The watcher now
+  compares file contents.
+
+### Changed
+
+- `src/index.ts`: the `Plugin.define()` wrapper is replaced by
+  `satisfies Plugin.Plugin`. `Plugin.define` is an identity function at
+  runtime, so this changes no behaviour, but it drops the only value import
+  from `@opencode/plugin`.
+
+### Removed
+
+- The standalone single-file variant `model-hide.ts` and the section
+  documenting it. Installation now always goes through npm. The file was
+  never part of the published package (it is not in the `files` list), so
+  this changes nothing for existing installs.
+
+Removing `model-hide.ts` also disposes of a real defect: it had silently stayed
+on 0.1.5 code while the package was at 0.1.6, with none of the catalog or
+favorite handling, and it did not typecheck.
 
 ## [0.1.5] - 2026-09-23
 

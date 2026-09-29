@@ -107,6 +107,36 @@ This repository has no branch protection ruleset and no enforced review. So:
 **ask before merging**, do not merge unprompted. Opening and pushing PRs is
 fine.
 
+## Every PR documents its change
+
+A pull request that changes behaviour carries an entry under `## [Unreleased]`
+in `CHANGELOG.md`, written **in that same PR**. Not at release time, not in a
+follow-up — in the change itself.
+
+Place it under the Keep a Changelog heading that fits: `Added`, `Changed`,
+`Fixed`, `Removed`. Those headings are also what `npm run release` reads to
+suggest a version, so the section is not only prose, it decides whether the next
+release is a patch or a minor.
+
+Entries describe what a user would notice, not which files were touched. "The
+bridge file is re-read after a malformed write" is useful; "`src/index.ts` changed"
+is not. Say what changed and, where it is not obvious, why.
+
+## The changelog is not verified, it is trusted
+
+`npm run release` moves the text under `## [Unreleased]` verbatim into the new
+version's section. That is the whole mechanism — it is a text substitution, not
+a check.
+
+Verified by injecting a behaviour change into `src/index.ts` with no changelog
+entry: format, typecheck and all 46 tests stayed green, and the release ran to
+completion without a word about the undocumented change. The commit that shipped
+it would have had no changelog entry at all.
+
+So the rule above is a discipline, not a guarantee. Nothing downstream will catch
+a forgotten entry, which is exactly why it belongs in the change rather than in a
+remembered checklist at release time.
+
 ## Failure modes that have already bitten here
 
 - A hand bump in `package.json` without a publish — the reason for 0.1.6. The

@@ -124,14 +124,18 @@ export default {
       }
     });
 
-    let lastSig = "";
+    let lastSig: string | undefined;
     let reloadTimer: ReturnType<typeof setTimeout> | undefined;
+    // Compare the file contents, not mtime/ctime/size. The metadata signature
+    // misses a write that lands in the same millisecond and keeps the size,
+    // which is exactly what happens when one model is swapped for another of
+    // equal length: 285 of 300 such writes went unnoticed. The file is a few
+    // hundred bytes, so reading it is cheaper than being wrong.
     const sig = () => {
       try {
-        const s = fs.statSync(bridgePath());
-        return `${s.mtimeMs}:${s.ctimeMs}:${s.size}`;
+        return fs.readFileSync(bridgePath(), "utf8");
       } catch {
-        return "";
+        return undefined;
       }
     };
     lastSig = sig();
@@ -140,6 +144,7 @@ export default {
       const next = sig();
       if (next === lastSig) return;
       lastSig = next;
+      if (next === undefined) return;
       try {
         hidden = readHidden();
         favorite = readFavorite();
