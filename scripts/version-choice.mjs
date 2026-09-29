@@ -52,6 +52,33 @@ export function buildCandidates(current) {
 }
 
 /**
+ * The versions to offer for this release.
+ *
+ * Candidates are derived from `current`, which is what `package.json` says, but
+ * that value can be ahead of the registry: a release that was prepared and never
+ * published leaves `package.json` at a version npm has never seen. Releasing
+ * that exact version is then the obvious choice, and it is offered first.
+ */
+export function buildReleaseCandidates(current, publishedLatest) {
+  const ahead =
+    publishedLatest != null &&
+    compareSemver(parseSemver(current), parseSemver(publishedLatest)) > 0;
+
+  const candidates = ahead
+    ? [
+        {
+          kind: "prepared",
+          version: current,
+          label: `already in package.json, never published (npm has ${publishedLatest})`,
+        },
+        ...buildCandidates(current),
+      ]
+    : buildCandidates(current);
+
+  return { candidates, ahead };
+}
+
+/**
  * Which bump the pending changelog entries look like, following the
  * Keep a Changelog section order.
  */

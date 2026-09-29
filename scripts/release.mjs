@@ -21,7 +21,7 @@ import path from "node:path";
 import readline from "node:readline";
 import url from "node:url";
 import {
-  buildCandidates,
+  buildReleaseCandidates,
   compareSemver,
   findReleaseSection,
   hasVersionLink,
@@ -129,17 +129,30 @@ if (!pending) {
 
 // --------------------------------------------------------------- suggestions
 
-async function chooseVersion() {
-  const suggested = suggestKind(current, pending);
-  const candidates = buildCandidates(current);
+async function chooseVersion(publishedLatest) {
+  const { candidates, ahead } = buildReleaseCandidates(
+    current,
+    publishedLatest,
+  );
+  // When package.json is ahead of npm, the prepared version is what almost
+  // always gets released, so it is recommended regardless of the changelog.
+  const suggestedKind = ahead ? "prepared" : suggestKind(current, pending).kind;
+  const why = ahead
+    ? `package.json is ahead of npm (${publishedLatest} is the newest published version)`
+    : suggestKind(current, pending).why;
   const recommendedIndex = candidates.findIndex(
-    (c) => c.kind === suggested.kind,
+    (c) => c.kind === suggestedKind,
   );
 
-  console.log(`\n  ${PKG_NAME} is at ${current}.\n`);
-  console.log(`  From CHANGELOG.md: ${suggested.why}\n`);
+  console.log(`\n  ${PKG_NAME} is at ${current} in package.json.\n`);
+  if (ahead) {
+    console.log(
+      `  npm's newest published version is ${publishedLatest}, so ${current} is still\n  waiting to be published.\n`,
+    );
+  }
+  console.log(`  From CHANGELOG.md: ${why}\n`);
   for (const [i, candidate] of candidates.entries()) {
-    const mark = candidate.kind === suggested.kind ? "  <- suggested" : "";
+    const mark = candidate.kind === suggestedKind ? "  <- suggested" : "";
     console.log(
       `    ${i + 1})  ${candidate.version.padEnd(9)} ${candidate.label}${mark}`,
     );
@@ -182,11 +195,51 @@ async function chooseVersion() {
   die("too many invalid answers, aborting");
 }
 
-const next = requested ?? (await chooseVersion());
+// ------------------------------------------------------------------- npm side
+
+// Read before the prompt: when package.json is ahead of the registry the
+// candidate list has to include the prepared version, and that cannot be known
+// without asking npm first.
+step("npm registry");
+const view = capture("npm", ["view", PKG_NAME, "versions", "--json"]);
+if (view.status !== 0) {
+  console.error(view.stdout ?? "");
+  console.error(view.stderr ?? "");
+  die("could not read the published versions from npm");
+}
+let published;
+try {
+  published = JSON.parse(view.stdout);
+} catch {
+  // npm answers `null` for a package with no versions at all
+  published = [];
+}
+if (!Array.isArray(published)) published = [];
+const semverOnly = published.filter((v) => parseSemver(v));
+const publishedLatest = semverOnly
+  .sort((a, b) => compareSemver(parseSemver(a), parseSemver(b)))
+  .at(-1);
+console.log(
+  `  published: ${published.length} version(s), latest ${publishedLatest ?? "(none)"}`,
+);
+
+const next = requested ?? (await chooseVersion(publishedLatest));
 const nextSemver = parseSemverOrDie(next, "version");
 
-if (compareSemver(nextSemver, currentSemver) <= 0) {
-  die(`version ${next} must be greater than the current ${current}`);
+if (published.includes(next)) {
+  die(`version ${next} is already published on npm`);
+}
+
+// `package.json` may already name the version that never made it to npm - that
+// is exactly the state 0.1.6 sat in for five days. Re-releasing the version
+// that is already in `package.json` is therefore legitimate, going backwards is
+// not.
+if (compareSemver(nextSemver, currentSemver) < 0) {
+  die(
+    `version ${next} is lower than the current ${current}.\n` +
+      `     package.json already names ${current}; releasing a lower version would\n` +
+      `     move it backwards.`,
+  );
 }
 
 // 0.1.6 sat committed but unpublished for days, which left a `## [0.1.6]`
@@ -237,32 +290,6 @@ if (capture("git", ["tag", "-l", `v${next}`]).stdout.trim()) {
 const latestTag = capture("git", ["tag", "--list", "v*", "--sort=-v:refname"])
   .stdout.split("\n")
   .filter(Boolean)[0];
-
-// ------------------------------------------------------------------- npm side
-
-step("npm registry");
-const view = capture("npm", ["view", PKG_NAME, "versions", "--json"]);
-if (view.status !== 0) {
-  console.error(view.stdout ?? "");
-  console.error(view.stderr ?? "");
-  die("could not read the published versions from npm");
-}
-let published;
-try {
-  published = JSON.parse(view.stdout);
-} catch {
-  // npm answers `null` for a package with no versions at all
-  published = [];
-}
-if (published.includes(next)) die(`${next} is already published on npm`);
-
-console.log(
-  `  published: ${published.length} version(s), latest tag ${
-    capture("npm", ["view", PKG_NAME, "dist-tags.latest"]).stdout.trim() ||
-    "(none)"
-  }`,
-);
-console.log(`  new:       ${next}`);
 
 // --------------------------------------------------------------------- CI gate
 

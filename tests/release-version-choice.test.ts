@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCandidates,
+  buildReleaseCandidates,
   bumpVersion,
   compareSemver,
   findReleaseSection,
@@ -49,6 +50,46 @@ describe("findReleaseSection", () => {
     // for instance after a release that was rolled back.
     const withStrayLink = `${CHANGELOG}\n[0.2.0]: https://example.test/compare/v0.1.6...v0.2.0\n`;
     expect(findReleaseSection(withStrayLink, "0.2.0")).toBeNull();
+  });
+});
+
+describe("buildReleaseCandidates", () => {
+  it("offers a plain bump when package.json matches the registry", () => {
+    const { candidates, ahead } = buildReleaseCandidates("0.1.6", "0.1.6");
+
+    expect(ahead).toBe(false);
+    expect(candidates.map((c) => c.version)).toEqual([
+      "0.1.7",
+      "0.2.0",
+      "1.0.0",
+    ]);
+  });
+
+  it("offers the prepared version first when package.json is ahead of npm", () => {
+    // The state 0.1.6 sat in: committed locally, never published.
+    const { candidates, ahead } = buildReleaseCandidates("0.1.6", "0.1.5");
+
+    expect(ahead).toBe(true);
+    expect(candidates[0].version).toBe("0.1.6");
+    expect(candidates[0].kind).toBe("prepared");
+    expect(candidates.map((c) => c.version)).toEqual([
+      "0.1.6",
+      "0.1.7",
+      "0.2.0",
+      "1.0.0",
+    ]);
+  });
+
+  it("says what is going on in the prepared label", () => {
+    const { candidates } = buildReleaseCandidates("0.2.0", "0.1.5");
+
+    expect(candidates[0].label).toContain("0.1.5");
+  });
+
+  it("treats an empty registry as no published version", () => {
+    const { ahead } = buildReleaseCandidates("0.1.0", null);
+
+    expect(ahead).toBe(false);
   });
 });
 

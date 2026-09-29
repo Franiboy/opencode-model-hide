@@ -19,7 +19,15 @@ export type Choice = { version: string } | { retry: true } | { abort: string };
 
 export declare function parseSemver(version: string): Semver | null;
 export declare function compareSemver(a: Semver, b: Semver): number;
+export type ReleaseCandidate = Candidate & {
+  kind: "patch" | "minor" | "major" | "prepared";
+};
+
 export declare function buildCandidates(current: string): Candidate[];
+export declare function buildReleaseCandidates(
+  current: string,
+  publishedLatest?: string | null,
+): { candidates: ReleaseCandidate[]; ahead: boolean };
 export declare function bumpVersion(version: string, kind: string): string;
 export declare function suggestKind(
   current: string,
