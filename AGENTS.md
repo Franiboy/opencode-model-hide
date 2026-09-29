@@ -107,6 +107,20 @@ This repository has no branch protection ruleset and no enforced review. So:
 **ask before merging**, do not merge unprompted. Opening and pushing PRs is
 fine.
 
+## The changelog is not verified, it is trusted
+
+`npm run release` moves the text under `## [Unreleased]` verbatim into the new
+version's section. That is the whole mechanism — it is a text substitution, not
+a check.
+
+Verified by injecting a behaviour change into `src/index.ts` with no changelog
+entry: format, typecheck and all 46 tests stayed green, and the release ran to
+completion without a word about the undocumented change. The commit that shipped
+it would have had no changelog entry at all.
+
+So the rule is: **write the entry when you make the change, not when you
+remember it at release time.** Nothing downstream will catch a forgotten one.
+
 ## Failure modes that have already bitten here
 
 - A hand bump in `package.json` without a publish — the reason for 0.1.6. The

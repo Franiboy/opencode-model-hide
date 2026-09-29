@@ -7,6 +7,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The version in `package.json` is the single source of truth for what the next
 `npm publish` will produce.
 
+`npm run release` moves everything under `## [Unreleased]` verbatim into the new
+version's section. Nothing checks that the section actually describes what
+changed: a commit that touches `src/` without an entry here is released with no
+entry and no warning. Keeping the section current is the author's job.
+
 ## [Unreleased]
 
 This release was prepared on 2026-09-24 and then sat committed but unpublished
