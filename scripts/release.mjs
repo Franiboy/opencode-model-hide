@@ -436,11 +436,16 @@ try {
   treeIsDirty = false;
 
   // Publish before pushing: if this fails, nothing has left the machine.
+  //
+  // stdio is inherited on purpose. npm only offers its browser based OTP flow
+  // when both stdin and stdout are a TTY (lib/utils/auth.js:
+  // `if (!process.stdin.isTTY || !process.stdout.isTTY) throw err`), and it
+  // masks the authentication URL when it is not, printing
+  // `https://www.npmjs.com/auth/cli/***`. Capturing the output would make the
+  // release impossible on an account with 2FA, which is exactly this one.
   step(`publish ${next} to npm`);
-  const publish = capture("npm", ["publish"]);
+  const publish = run("npm", ["publish"], { allowFailure: true });
   if (publish.status !== 0) {
-    console.error(publish.stdout ?? "");
-    console.error(publish.stderr ?? "");
     rollback();
     die(
       "npm publish failed, nothing was pushed. main is unchanged.\n" +
