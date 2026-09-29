@@ -80,6 +80,28 @@ export function suggestKind(current, pending) {
 }
 
 /**
+ * The date of an existing `## [<version>]` heading, or null when the changelog
+ * has no section for that version yet.
+ */
+export function findReleaseSection(changelog, version) {
+  // `\]` followed by whitespace or end of line. `\b` does not work here: `]` is
+  // not a word character, so there is no boundary between it and the space in
+  // "## [0.1.6] - 2026-09-24" and the pattern would never match at all.
+  const match = new RegExp(
+    `^## \\[${version.replace(/\./g, "\\.")}\\](?=\\s|$)`,
+    "m",
+  ).exec(changelog);
+  return match ? match[0] : null;
+}
+
+/** True when the link reference block already defines `[<version>]:`. */
+export function hasVersionLink(changelog, version) {
+  return new RegExp(`^\\[${version.replace(/\./g, "\\.")}\\]:`, "m").test(
+    changelog,
+  );
+}
+
+/**
  * Turn one answer from the prompt into a decision.
  * Returns {version}, {retry: true} or {abort: reason}.
  */

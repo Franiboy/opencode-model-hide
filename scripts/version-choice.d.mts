@@ -25,6 +25,14 @@ export declare function suggestKind(
   current: string,
   pending: string,
 ): Suggestion;
+export declare function findReleaseSection(
+  changelog: string,
+  version: string,
+): string | null;
+export declare function hasVersionLink(
+  changelog: string,
+  version: string,
+): boolean;
 export declare function resolveChoice(
   answer: unknown,
   candidates: Candidate[],

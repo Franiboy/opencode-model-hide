@@ -23,6 +23,8 @@ import url from "node:url";
 import {
   buildCandidates,
   compareSemver,
+  findReleaseSection,
+  hasVersionLink,
   parseSemver,
   resolveChoice,
   suggestKind,
@@ -187,6 +189,19 @@ if (compareSemver(nextSemver, currentSemver) <= 0) {
   die(`version ${next} must be greater than the current ${current}`);
 }
 
+// 0.1.6 sat committed but unpublished for days, which left a `## [0.1.6]`
+// section in the changelog for a version that never reached npm. Releasing
+// 0.1.6 again would have produced two headings of the same name and two link
+// references. Folding that section into Unreleased is a judgement call, so the
+// script stops instead of guessing.
+if (findReleaseSection(changelog, next)) {
+  die(
+    `CHANGELOG.md already has a "## [${next}]" section.\n` +
+      `     Fold it into ## [Unreleased] first - it was written for a version that\n` +
+      `     never reached npm. Then run the release again.`,
+  );
+}
+
 // ---------------------------------------------------------- repository state
 
 step(`release ${current} -> ${next} of ${PKG_NAME}`);
@@ -305,12 +320,19 @@ let updated = changelog.replace(
 
 // Keep the link references truthful: Unreleased now starts at the new tag, and
 // the new version gets a link from the previously released one, in the same
-// descending order as the entries already there.
+// descending order as the entries already there. Idempotent, so a hand written
+// link is never duplicated.
 const base = `https://github.com/${REPO}/compare`;
 updated = updated.replace(
   /^\[Unreleased\]:.*$/m,
-  `[Unreleased]: ${base}/v${next}...HEAD\n[${next}]: ${base}/v${previous}...v${next}`,
+  `[Unreleased]: ${base}/v${next}...HEAD`,
 );
+if (!hasVersionLink(updated, next)) {
+  updated = updated.replace(
+    /^(\[Unreleased\]:.*)$/m,
+    `$1\n[${next}]: ${base}/v${previous}...v${next}`,
+  );
+}
 fs.writeFileSync(changelogPath, updated);
 
 // ------------------------------------------------------------------ the bump

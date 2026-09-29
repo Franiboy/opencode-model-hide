@@ -3,10 +3,64 @@ import {
   buildCandidates,
   bumpVersion,
   compareSemver,
+  findReleaseSection,
+  hasVersionLink,
   parseSemver,
   resolveChoice,
   suggestKind,
 } from "../scripts/version-choice.mjs";
+
+// 0.1.6 is the reason these exist: it sat committed but unpublished, which left
+// a `## [0.1.6]` section behind. Releasing it again would have written a second
+// heading of the same name and a second link reference.
+const CHANGELOG = [
+  "## [Unreleased]",
+  "",
+  "### Added",
+  "",
+  "- something",
+  "",
+  "## [0.1.6] - 2026-09-24",
+  "",
+  "### Added",
+  "",
+  "- the catalog",
+  "",
+  "[Unreleased]: https://example.test/compare/v0.1.5...HEAD",
+  "[0.1.6]: https://example.test/compare/v0.1.5...v0.1.6",
+  "[0.1.5]: https://example.test/compare/v0.1.4...v0.1.5",
+].join("\n");
+
+describe("findReleaseSection", () => {
+  it("finds an existing section for the version", () => {
+    expect(findReleaseSection(CHANGELOG, "0.1.6")).toBe("## [0.1.6]");
+  });
+
+  it("returns null for a version without a section", () => {
+    expect(findReleaseSection(CHANGELOG, "0.2.0")).toBeNull();
+  });
+
+  it("does not match a version that is only a prefix of another", () => {
+    expect(findReleaseSection(CHANGELOG, "0.1")).toBeNull();
+  });
+
+  it("does not confuse a link reference for a section", () => {
+    // The link block may already mention a version that never got a heading,
+    // for instance after a release that was rolled back.
+    const withStrayLink = `${CHANGELOG}\n[0.2.0]: https://example.test/compare/v0.1.6...v0.2.0\n`;
+    expect(findReleaseSection(withStrayLink, "0.2.0")).toBeNull();
+  });
+});
+
+describe("hasVersionLink", () => {
+  it("sees an existing link reference", () => {
+    expect(hasVersionLink(CHANGELOG, "0.1.6")).toBe(true);
+  });
+
+  it("does not see a missing one", () => {
+    expect(hasVersionLink(CHANGELOG, "0.2.0")).toBe(false);
+  });
+});
 
 // These are the decisions that pick the released version. They are tested here
 // because `npm run release` can only be exercised by hand, and only on the
