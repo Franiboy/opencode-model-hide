@@ -41,6 +41,10 @@ published 0.1.6 rather than two.
   commits and tags locally, then publishes, and only then pushes. If the
   publish fails it rolls the commit and the tag back, so `main` is never left
   with a release that does not exist on npm.
+- A contributing rule in `README.md` and `AGENTS.md`: a change carries its
+  `## [Unreleased]` entry in the same pull request that makes it. Nothing
+  enforces this, because `npm run release` copies that section verbatim and never
+  compares it against what actually changed.
 
 ### Changed
 
