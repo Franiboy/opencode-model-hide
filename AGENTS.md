@@ -111,9 +111,28 @@ typecheck, Vitest) and `pack` (tarball contents). Dependabot reports
 `@opencode/plugin` separately from the other devDependencies, because a break
 there turns CI red.
 
-This repository has no branch protection ruleset and no enforced review. So:
-**ask before merging**, do not merge unprompted. Opening and pushing PRs is
-fine.
+`main` is protected by branch protection (legacy endpoint, not a ruleset):
+a pull request with **one approving review**, the last pusher not being able to
+approve their own commit, stale reviews dismissed on every new push, all three
+CI checks green and up to date with `main`, and no unresolved conversation.
+Force pushes and branch deletion are off. Merge methods allowed are squash and
+merge, which is what the history actually uses.
+
+**Administrators bypass all of it** (`enforce_admins` is off). That is not an
+oversight, it is the load-bearing part: `npm run release` commits on `main` and
+pushes it _after_ `npm publish`, so a hard block on that push would fail with
+the version already live on npm and no commit on the remote. The bypass is what
+keeps the ordering in "Release" safe. `Franiboy` is the only collaborator and the
+only admin, so "bypass" means the release script and nothing else. If a second
+admin is ever added, the bypass stops being narrow and this reasoning expires.
+
+Release tags are **not** protected. Tag protection only exists through rulesets,
+and creating a ruleset on this repository answers `404 Not Found` while reading
+them answers `[]`, so the plan does not expose the endpoint. Tags therefore rely
+on the account not pushing them by accident.
+
+Even with the bypass, still **ask before merging**, do not merge unprompted.
+Opening and pushing PRs is fine.
 
 ## Every PR documents its change
 
