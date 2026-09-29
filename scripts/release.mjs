@@ -317,10 +317,7 @@ run("npm", ["version", next, "--no-git-tag-version"]);
 
 // ---------------------------------------------------------------- transaction
 
-step("commit and tag");
-run("git", ["add", "package.json", "package-lock.json", "CHANGELOG.md"]);
-run("git", ["commit", "-m", `Release v${next}`]);
-run("git", ["tag", "-a", `v${next}`, "-m", `${PKG_NAME} v${next}`]);
+const TOUCHED = ["package.json", "package-lock.json", "CHANGELOG.md"];
 
 function rollback() {
   console.log("\n==> rolling back commit and tag");
@@ -328,20 +325,27 @@ function rollback() {
   run("git", ["tag", "-d", `v${next}`], { allowFailure: true });
 }
 
+// A dry run must not create a commit in the first place. The previous version
+// committed and then reset, which left a release commit behind whenever the
+// process died between the two - verified, not theoretical.
 if (dryRun) {
-  console.log("\n==> dry run, nothing was published or pushed");
-  console.log("\n--- git log ---");
-  run("git", ["log", "--oneline", "-2"]);
-  console.log("\n--- git diff HEAD~1 ---");
-  run("git", ["diff", "HEAD~1", "HEAD"]);
-  rollback();
-  console.log("\n--- restored ---");
+  console.log("\n==> dry run: showing what would change, nothing committed");
+  console.log("\n--- git diff ---");
+  run("git", ["diff", "--", ...TOUCHED]);
+  console.log("\n==> restoring the working tree");
+  run("git", ["checkout", "--", ...TOUCHED]);
   run("git", ["status", "--short"]);
   console.log(
-    `  HEAD is back at ${capture("git", ["rev-parse", "--short", "HEAD"]).stdout.trim()}`,
+    `  HEAD is still ${capture("git", ["rev-parse", "--short", "HEAD"]).stdout.trim()}, ` +
+      `no commit and no tag were created`,
   );
   process.exit(0);
 }
+
+step("commit and tag");
+run("git", ["add", ...TOUCHED]);
+run("git", ["commit", "-m", `Release v${next}`]);
+run("git", ["tag", "-a", `v${next}`, "-m", `${PKG_NAME} v${next}`]);
 
 // Publish before pushing: if this fails, nothing has left the machine.
 step(`publish ${next} to npm`);
