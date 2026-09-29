@@ -206,13 +206,17 @@ async function chooseVersion() {
   });
   try {
     for (let attempt = 1; attempt <= 5; attempt++) {
-      const answer = (
-        await rl.question(
-          `\n  Auswahl [1-${candidates.length}, Enter = ${
-            candidates.indexOf(recommended) + 1
-          }, oder eine eigene Version]: `,
-        )
-      ).trim();
+      const raw = await rl.question(
+        `\n  Auswahl [1-${candidates.length}, Enter = ${
+          candidates.indexOf(recommended) + 1
+        }, oder eine eigene Version]: `,
+      );
+      // readline resolves with undefined when stdin closed (Ctrl+D) instead of
+      // handing back an empty string.
+      if (typeof raw !== "string") {
+        die("no answer, stdin closed");
+      }
+      const answer = raw.trim();
 
       if (!answer) return recommended.version;
 
