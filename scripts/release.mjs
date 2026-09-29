@@ -463,15 +463,16 @@ try {
   if (latest !== next) {
     die(`published, but dist-tags.latest is "${latest}" instead of "${next}"`);
   }
+
+  console.log(`  npm latest  = ${latest}`);
+  console.log(
+    `  git tag     = ${capture("git", ["rev-parse", "--short", `v${next}^{commit}`]).stdout.trim()}`,
+  );
+  console.log(
+    `  remote tag  = ${capture("git", ["ls-remote", "--tags", "origin", `v${next}`]).stdout.split("\t")[0]}`,
+  );
+  console.log(`\n==> released ${PKG_NAME}@${next}\n`);
 } catch (error) {
   if (!committed) restoreFiles();
   throw error;
 }
-console.log(`  npm latest  = ${latest}`);
-console.log(
-  `  git tag     = ${capture("git", ["rev-parse", "--short", `v${next}^{commit}`]).stdout.trim()}`,
-);
-console.log(
-  `  remote tag  = ${capture("git", ["ls-remote", "--tags", "origin", `v${next}`]).stdout.split("\t")[0]}`,
-);
-console.log(`\n==> released ${PKG_NAME}@${next}\n`);
