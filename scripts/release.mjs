@@ -18,6 +18,7 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import readline from "node:readline";
 import url from "node:url";
 
 const root = path.dirname(
@@ -91,13 +92,9 @@ const unknown = [...flags].filter(
   (f) => !["--dry-run", "--skip-ci"].includes(f),
 );
 if (unknown.length) die(`unknown flag(s): ${unknown.join(", ")}`);
-if (positional.length !== 1) {
-  die("exactly one version is required, e.g. `npm run release -- 0.1.7`");
+if (positional.length > 1) {
+  die(`expected at most one version, got: ${positional.join(", ")}`);
 }
-const next = requested;
-const nextSemver = parseSemver(next);
-if (!nextSemver)
-  die(`"${next}" is not a plain semver version (major.minor.patch)`);
 
 const pkg = JSON.parse(
   fs.readFileSync(path.join(root, "package.json"), "utf8"),
@@ -105,6 +102,142 @@ const pkg = JSON.parse(
 const current = pkg.version;
 const currentSemver = parseSemver(current);
 if (!currentSemver) die(`package.json version "${current}" is not semver`);
+
+// ------------------------------------------------------- changelog (read early)
+
+// Read before anything else: the Unreleased section is both the source for the
+// version suggestions and a hard precondition, so a missing one should fail
+// before the user is asked to pick anything.
+const changelogPath = path.join(root, "CHANGELOG.md");
+const changelog = fs.readFileSync(changelogPath, "utf8");
+const unreleasedHeading = /^## \[Unreleased\][ \t]*$/m;
+if (!unreleasedHeading.test(changelog)) {
+  die(
+    "CHANGELOG.md has no `## [Unreleased]` section.\n" +
+      "     Write the release notes there first, then run the release.",
+  );
+}
+const body = changelog.slice(
+  changelog.indexOf("## [Unreleased]") + "## [Unreleased]".length,
+);
+const pending = body
+  .split(/^## /m)[0]
+  .replace(/^\s*\[.*?\]:.*$/gm, "")
+  .trim();
+if (!pending) {
+  // Not fatal: a Dependabot bump has nothing to announce, and refusing those
+  // would make dependency updates unreleasable.
+  console.log(
+    "\n  note: the Unreleased section is empty, so the suggestion below is a guess.",
+  );
+}
+
+// --------------------------------------------------------------- suggestions
+
+function bump(version, kind) {
+  const v = parseSemver(version);
+  // 0.1.6-rc.1 -> 0.1.6 is the patch release the prerelease was heading for.
+  if (v.prerelease && kind === "patch")
+    return `${v.major}.${v.minor}.${v.patch}`;
+  if (kind === "patch") return `${v.major}.${v.minor}.${v.patch + 1}`;
+  if (kind === "minor") return `${v.major}.${v.minor + 1}.0`;
+  return `${v.major + 1}.0.0`;
+}
+
+/** Which bump the pending changelog entries look like. Keep a Changelog order. */
+function recommend() {
+  const sections = [...body.matchAll(/^###\s+(.+?)\s*$/gm)].map((m) =>
+    m[1].toLowerCase(),
+  );
+  const has = (name) => sections.some((s) => s.includes(name));
+  const breaking =
+    has("removed") || /\bbreaking\b|\bincompatible\b/i.test(pending);
+
+  // Below 1.0.0 semver treats the minor bump as the breaking one, and so does
+  // this package: it is at 0.x and has no stability promise to break.
+  if (breaking) {
+    return currentSemver.major === 0
+      ? { kind: "minor", why: "Breaking oder Entferntes, paket ist noch 0.x" }
+      : { kind: "major", why: "Breaking oder Entferntes" };
+  }
+  if (has("added"))
+    return { kind: "minor", why: "Neue Funktionen (### Added)" };
+  if (sections.length)
+    return { kind: "patch", why: "Nur Fehler und Änderungen" };
+  return { kind: "patch", why: "Keine benannten Abschnitte" };
+}
+
+const candidates = ["patch", "minor", "major"].map((kind) => ({
+  kind,
+  version: bump(current, kind),
+  label: {
+    patch: "Patch — nur Fehlerbehebungen",
+    minor: "Minor — neue Funktionen, ab 0.x auch inkompatibel",
+    major: "Major — inkompatibel",
+  }[kind],
+}));
+
+async function chooseVersion() {
+  const suggested = recommend();
+  const recommended = candidates.find((c) => c.kind === suggested.kind);
+
+  console.log(`\n  ${PKG_NAME} steht auf ${current}.\n`);
+  console.log(`  Aus CHANGELOG.md: ${suggested.why}\n`);
+  for (const [i, candidate] of candidates.entries()) {
+    const mark = candidate.kind === suggested.kind ? "  <- empfohlen" : "";
+    console.log(
+      `    ${i + 1})  ${candidate.version.padEnd(9)} ${candidate.label}${mark}`,
+    );
+  }
+
+  // Without a terminal there is nobody to answer, and readline on a closed
+  // stdin would either hang or return undefined. Fail instead.
+  if (!process.stdin.isTTY) {
+    console.log("");
+    die(
+      "no version given and stdin is not a terminal, cannot ask.\n" +
+        `     Run it interactively, or pass one: npm run release -- ${recommended.version}`,
+    );
+  }
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  try {
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      const answer = (
+        await rl.question(
+          `\n  Auswahl [1-${candidates.length}, Enter = ${
+            candidates.indexOf(recommended) + 1
+          }, oder eine eigene Version]: `,
+        )
+      ).trim();
+
+      if (!answer) return recommended.version;
+
+      const byIndex = Number(answer);
+      if (
+        Number.isInteger(byIndex) &&
+        byIndex >= 1 &&
+        byIndex <= candidates.length
+      ) {
+        return candidates[byIndex - 1].version;
+      }
+      if (parseSemver(answer)) return answer;
+
+      console.log(`  "${answer}" ist weder eine Auswahl noch eine Version.`);
+    }
+  } finally {
+    rl.close();
+  }
+  die("too many invalid answers, aborting");
+}
+
+const next = requested ?? (await chooseVersion());
+const nextSemver = parseSemver(next);
+if (!nextSemver)
+  die(`"${next}" is not a plain semver version (major.minor.patch)`);
 
 if (compareSemver(nextSemver, currentSemver) <= 0) {
   die(`version ${next} must be greater than the current ${current}`);
@@ -216,29 +349,11 @@ run("npm", ["run", "check"]);
 // ------------------------------------------------------------------- changelog
 
 step("changelog");
-const changelogPath = path.join(root, "CHANGELOG.md");
-const changelog = fs.readFileSync(changelogPath, "utf8");
-const unreleasedHeading = /^## \[Unreleased\][ \t]*$/m;
-if (!unreleasedHeading.test(changelog)) {
-  die(
-    "CHANGELOG.md has no `## [Unreleased]` section.\n" +
-      "     Write the release notes there first, then run the release.",
-  );
-}
-const body = changelog.slice(
-  changelog.indexOf("## [Unreleased]") + "## [Unreleased]".length,
-);
-const pending = body
-  .split(/^## /m)[0]
-  .replace(/^\s*\[.*?\]:.*$/gm, "")
-  .trim();
-if (!pending) console.log("  note: the Unreleased section is empty");
-
 const today = new Date().toISOString().slice(0, 10);
 const previous = latestTag?.replace(/^v/, "") ?? current;
-// Only horizontal whitespace above: `\s*$` would swallow the blank line
-// between the heading and the body, and the emitted changelog has to stay
-// prettier-clean or the release commit lands on a red CI.
+// Only horizontal whitespace in the pattern above: `\s*$` would swallow the
+// blank line between the heading and the body, and the emitted changelog has to
+// stay prettier-clean or the release commit lands on a red CI.
 let updated = changelog.replace(
   unreleasedHeading,
   `## [Unreleased]\n\n## [${next}] - ${today}`,
