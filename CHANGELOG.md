@@ -14,6 +14,8 @@ entry and no warning. Keeping the section current is the author's job.
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-09-29
+
 This release was prepared on 2026-09-24 and then sat committed but unpublished
 for five days, so it also carries the tooling work that followed. Nothing from
 that first attempt ever reached npm, which is why there is only ever one
@@ -125,7 +127,7 @@ tree that does not contain `src/probe.ts`, so no tag was created.
 - First npm release of `@franiboy/opencode-model-hide`, with the server-side
   model filter and the TUI selector.
 
-[Unreleased]: https://github.com/Franiboy/opencode-model-hide/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/Franiboy/opencode-model-hide/compare/v0.1.6...HEAD
 [0.1.6]: https://github.com/Franiboy/opencode-model-hide/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/Franiboy/opencode-model-hide/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/Franiboy/opencode-model-hide/compare/v0.1.0...v0.1.4
