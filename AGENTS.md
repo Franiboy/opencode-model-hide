@@ -63,6 +63,14 @@ script-checked state. Code changes still go through a PR.
 
 - npm has 2FA on writes. `npm publish` prints a URL that has to be confirmed in
   a browser. An automation token would avoid that but none is configured.
+
+  That URL only works when `npm publish` runs with both stdin and stdout
+  attached to a terminal. npm starts the browser flow only under that condition
+  and masks the URL otherwise, printing `auth/cli/***` — see
+  `lib/utils/auth.js`: `if (!process.stdin.isTTY || !process.stdout.isTTY)
+throw err`. Never capture the publish output; the script inherits stdio for
+  exactly this reason.
+
 - A missing `## [Unreleased]` section in the changelog aborts the release. Write
   the notes first, release second. An _empty_ section is allowed, because a
   Dependabot bump has nothing to announce.

@@ -48,6 +48,11 @@ published 0.1.6 rather than two.
 
 ### Fixed
 
+- `npm run release` can now publish on an account with 2FA. It captured the
+  output of `npm publish`, and npm only offers its browser-based one-time
+  password flow when both stdin and stdout are a terminal — otherwise it masks
+  the authentication URL as `auth/cli/***`, which cannot be opened. The release
+  always failed at that step.
 - The bridge-file watcher no longer misses a change that keeps the file size the
   same. It compared `mtime:ctime:size` and skipped the reload when that
   signature was unchanged; because the bridge file holds a few dozen bytes of
