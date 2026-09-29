@@ -51,6 +51,10 @@ function step(message) {
   console.log(`\n==> ${message}`);
 }
 
+// Set once the working tree has been edited on purpose, so a later failure
+// restores the files instead of leaving a half applied release behind.
+let treeIsDirty = false;
+
 function run(command, commandArgs, options = {}) {
   // Never let git spawn a pager: it would sit there waiting for a keypress and
   // turn the script into a hang.
@@ -65,6 +69,16 @@ function run(command, commandArgs, options = {}) {
     if (options.capture) {
       console.error(res.stdout ?? "");
       console.error(res.stderr ?? "");
+    }
+    if (treeIsDirty && options.restoreOnFailure !== false) {
+      console.log("\n==> restoring the working tree");
+      run(
+        "git",
+        ["checkout", "--", "package.json", "package-lock.json", "CHANGELOG.md"],
+        {
+          allowFailure: true,
+        },
+      );
     }
     die(`${command} ${commandArgs.join(" ")} failed with exit ${res.status}`);
   }
@@ -361,15 +375,28 @@ if (!hasVersionLink(updated, next)) {
   );
 }
 fs.writeFileSync(changelogPath, updated);
+treeIsDirty = true;
 
 // ------------------------------------------------------------------ the bump
 
 step("bump version");
-run("npm", ["version", next, "--no-git-tag-version"]);
+if (compareSemver(nextSemver, currentSemver) === 0) {
+  // `npm version` refuses a no-op. The files already carry the right version,
+  // but the lockfile is not guaranteed to agree after a hand edit, so it is
+  // synced rather than assumed.
+  console.log(`  package.json already says ${next}, skipping the bump`);
+  run("npm", ["install", "--package-lock-only", "--ignore-scripts"]);
+} else {
+  run("npm", ["version", next, "--no-git-tag-version"]);
+}
 
 // ---------------------------------------------------------------- transaction
 
 const TOUCHED = ["package.json", "package-lock.json", "CHANGELOG.md"];
+
+function restoreFiles() {
+  run("git", ["checkout", "--", ...TOUCHED], { allowFailure: true });
+}
 
 function rollback() {
   console.log("\n==> rolling back commit and tag");
@@ -385,7 +412,7 @@ if (dryRun) {
   console.log("\n--- git diff ---");
   run("git", ["diff", "--", ...TOUCHED]);
   console.log("\n==> restoring the working tree");
-  run("git", ["checkout", "--", ...TOUCHED]);
+  restoreFiles();
   run("git", ["status", "--short"]);
   console.log(
     `  HEAD is still ${capture("git", ["rev-parse", "--short", "HEAD"]).stdout.trim()}, ` +
@@ -394,38 +421,51 @@ if (dryRun) {
   process.exit(0);
 }
 
-step("commit and tag");
-run("git", ["add", ...TOUCHED]);
-run("git", ["commit", "-m", `Release v${next}`]);
-run("git", ["tag", "-a", `v${next}`, "-m", `${PKG_NAME} v${next}`]);
+// From here on the working tree is dirty by design. `die` must therefore also
+// undo the file edits, otherwise a failure between the changelog write and the
+// commit leaves a half applied release behind - which is what happened when
+// `npm version` refused a no-op bump.
+let committed = false;
 
-// Publish before pushing: if this fails, nothing has left the machine.
-step(`publish ${next} to npm`);
-const publish = capture("npm", ["publish"]);
-if (publish.status !== 0) {
-  console.error(publish.stdout ?? "");
-  console.error(publish.stderr ?? "");
-  rollback();
-  die(
-    "npm publish failed, nothing was pushed. main is unchanged.\n" +
-      "     (The npm account has 2FA on writes: open the printed URL, then rerun.)",
-  );
-}
+try {
+  step("commit and tag");
+  run("git", ["add", ...TOUCHED]);
+  run("git", ["commit", "-m", `Release v${next}`]);
+  run("git", ["tag", "-a", `v${next}`, "-m", `${PKG_NAME} v${next}`]);
+  committed = true;
+  treeIsDirty = false;
 
-// The commit first, then the tag: a remote tag must never exist without its
-// commit.
-step("push");
-run("git", ["push", "origin", "main"]);
-run("git", ["push", "origin", `v${next}`]);
+  // Publish before pushing: if this fails, nothing has left the machine.
+  step(`publish ${next} to npm`);
+  const publish = capture("npm", ["publish"]);
+  if (publish.status !== 0) {
+    console.error(publish.stdout ?? "");
+    console.error(publish.stderr ?? "");
+    rollback();
+    die(
+      "npm publish failed, nothing was pushed. main is unchanged.\n" +
+        "     (The npm account has 2FA on writes: open the printed URL, then rerun.)",
+    );
+  }
 
-step("verify");
-const latest = capture("npm", [
-  "view",
-  PKG_NAME,
-  "dist-tags.latest",
-]).stdout.trim();
-if (latest !== next) {
-  die(`published, but dist-tags.latest is "${latest}" instead of "${next}"`);
+  // The commit first, then the tag: a remote tag must never exist without its
+  // commit.
+  step("push");
+  run("git", ["push", "origin", "main"]);
+  run("git", ["push", "origin", `v${next}`]);
+
+  step("verify");
+  const latest = capture("npm", [
+    "view",
+    PKG_NAME,
+    "dist-tags.latest",
+  ]).stdout.trim();
+  if (latest !== next) {
+    die(`published, but dist-tags.latest is "${latest}" instead of "${next}"`);
+  }
+} catch (error) {
+  if (!committed) restoreFiles();
+  throw error;
 }
 console.log(`  npm latest  = ${latest}`);
 console.log(
