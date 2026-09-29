@@ -50,7 +50,10 @@ function step(message) {
 }
 
 function run(command, commandArgs, options = {}) {
-  const res = spawnSync(command, commandArgs, {
+  // Never let git spawn a pager: it would sit there waiting for a keypress and
+  // turn the script into a hang.
+  const full = command === "git" ? ["--no-pager", ...commandArgs] : commandArgs;
+  const res = spawnSync(command, full, {
     cwd: root,
     encoding: "utf8",
     stdio: options.capture ? "pipe" : "inherit",
