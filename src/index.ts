@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Plugin } from "@opencode/plugin";
+import type { Plugin } from "@opencode/plugin";
 
 const DEFAULT_BRIDGE = path.join(
   os.homedir(),
@@ -75,9 +75,9 @@ function writeCatalog(models: readonly ModelEntry[]): void {
   }
 }
 
-export default Plugin.define({
+export default {
   id: "model-hide",
-  async setup(ctx) {
+  async setup(ctx: Plugin.Context) {
     let hidden = readHidden();
     let favorite = readFavorite();
 
@@ -158,4 +158,4 @@ export default Plugin.define({
       fs.unwatchFile(bridgePath());
     };
   },
-});
+} satisfies Plugin.Plugin;
