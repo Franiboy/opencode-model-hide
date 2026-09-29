@@ -20,6 +20,13 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import url from "node:url";
+import {
+  buildCandidates,
+  compareSemver,
+  parseSemver,
+  resolveChoice,
+  suggestKind,
+} from "./version-choice.mjs";
 
 const root = path.dirname(
   url.fileURLToPath(new URL("../package.json", import.meta.url)),
@@ -63,26 +70,10 @@ function capture(command, commandArgs) {
   return run(command, commandArgs, { capture: true, allowFailure: true });
 }
 
-function parseSemver(version) {
-  const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(version);
-  if (!match) return null;
-  return {
-    major: Number(match[1]),
-    minor: Number(match[2]),
-    patch: Number(match[3]),
-    prerelease: match[4] ?? null,
-  };
-}
-
-function compareSemver(a, b) {
-  if (a.major !== b.major) return a.major - b.major;
-  if (a.minor !== b.minor) return a.minor - b.minor;
-  if (a.patch !== b.patch) return a.patch - b.patch;
-  // A prerelease sorts before its release: 1.0.0-rc.1 < 1.0.0
-  if (a.prerelease && !b.prerelease) return -1;
-  if (!a.prerelease && b.prerelease) return 1;
-  if (!a.prerelease && !b.prerelease) return 0;
-  return a.prerelease.localeCompare(b.prerelease);
+function parseSemverOrDie(version, label) {
+  const parsed = parseSemver(version);
+  if (!parsed) die(`${label} "${version}" is not a plain semver version`);
+  return parsed;
 }
 
 // ---------------------------------------------------------------- arguments
@@ -100,8 +91,7 @@ const pkg = JSON.parse(
   fs.readFileSync(path.join(root, "package.json"), "utf8"),
 );
 const current = pkg.version;
-const currentSemver = parseSemver(current);
-if (!currentSemver) die(`package.json version "${current}" is not semver`);
+const currentSemver = parseSemverOrDie(current, "package.json version");
 
 // ------------------------------------------------------- changelog (read early)
 
@@ -134,69 +124,29 @@ if (!pending) {
 
 // --------------------------------------------------------------- suggestions
 
-function bump(version, kind) {
-  const v = parseSemver(version);
-  // 0.1.6-rc.1 -> 0.1.6 is the patch release the prerelease was heading for.
-  if (v.prerelease && kind === "patch")
-    return `${v.major}.${v.minor}.${v.patch}`;
-  if (kind === "patch") return `${v.major}.${v.minor}.${v.patch + 1}`;
-  if (kind === "minor") return `${v.major}.${v.minor + 1}.0`;
-  return `${v.major + 1}.0.0`;
-}
-
-/** Which bump the pending changelog entries look like. Keep a Changelog order. */
-function recommend() {
-  const sections = [...body.matchAll(/^###\s+(.+?)\s*$/gm)].map((m) =>
-    m[1].toLowerCase(),
-  );
-  const has = (name) => sections.some((s) => s.includes(name));
-  const breaking =
-    has("removed") || /\bbreaking\b|\bincompatible\b/i.test(pending);
-
-  // Below 1.0.0 semver treats the minor bump as the breaking one, and so does
-  // this package: it is at 0.x and has no stability promise to break.
-  if (breaking) {
-    return currentSemver.major === 0
-      ? { kind: "minor", why: "Breaking oder Entferntes, paket ist noch 0.x" }
-      : { kind: "major", why: "Breaking oder Entferntes" };
-  }
-  if (has("added"))
-    return { kind: "minor", why: "Neue Funktionen (### Added)" };
-  if (sections.length)
-    return { kind: "patch", why: "Nur Fehler und Änderungen" };
-  return { kind: "patch", why: "Keine benannten Abschnitte" };
-}
-
-const candidates = ["patch", "minor", "major"].map((kind) => ({
-  kind,
-  version: bump(current, kind),
-  label: {
-    patch: "Patch — nur Fehlerbehebungen",
-    minor: "Minor — neue Funktionen, ab 0.x auch inkompatibel",
-    major: "Major — inkompatibel",
-  }[kind],
-}));
-
 async function chooseVersion() {
-  const suggested = recommend();
-  const recommended = candidates.find((c) => c.kind === suggested.kind);
+  const suggested = suggestKind(current, pending);
+  const candidates = buildCandidates(current);
+  const recommendedIndex = candidates.findIndex(
+    (c) => c.kind === suggested.kind,
+  );
 
-  console.log(`\n  ${PKG_NAME} steht auf ${current}.\n`);
-  console.log(`  Aus CHANGELOG.md: ${suggested.why}\n`);
+  console.log(`\n  ${PKG_NAME} is at ${current}.\n`);
+  console.log(`  From CHANGELOG.md: ${suggested.why}\n`);
   for (const [i, candidate] of candidates.entries()) {
-    const mark = candidate.kind === suggested.kind ? "  <- empfohlen" : "";
+    const mark = candidate.kind === suggested.kind ? "  <- suggested" : "";
     console.log(
       `    ${i + 1})  ${candidate.version.padEnd(9)} ${candidate.label}${mark}`,
     );
   }
 
   // Without a terminal there is nobody to answer, and readline on a closed
-  // stdin would either hang or return undefined. Fail instead.
+  // stdin would either hang or resolve to undefined. Fail instead.
   if (!process.stdin.isTTY) {
     console.log("");
     die(
       "no version given and stdin is not a terminal, cannot ask.\n" +
-        `     Run it interactively, or pass one: npm run release -- ${recommended.version}`,
+        `     Run it interactively, or pass one: npm run release -- ${candidates[recommendedIndex].version}`,
     );
   }
 
@@ -204,33 +154,22 @@ async function chooseVersion() {
     input: process.stdin,
     output: process.stdout,
   });
+  // The callback form, not the promise form: on Node 24.19 the promise form
+  // resolves with undefined before any input has arrived.
+  const ask = (promptText) =>
+    new Promise((resolve) => rl.question(promptText, resolve));
+
   try {
     for (let attempt = 1; attempt <= 5; attempt++) {
-      const raw = await rl.question(
-        `\n  Auswahl [1-${candidates.length}, Enter = ${
-          candidates.indexOf(recommended) + 1
-        }, oder eine eigene Version]: `,
+      const answer = await ask(
+        `\n  Choice [1-${candidates.length}, Enter = ${recommendedIndex + 1}, or type a version]: `,
       );
-      // readline resolves with undefined when stdin closed (Ctrl+D) instead of
-      // handing back an empty string.
-      if (typeof raw !== "string") {
-        die("no answer, stdin closed");
-      }
-      const answer = raw.trim();
-
-      if (!answer) return recommended.version;
-
-      const byIndex = Number(answer);
-      if (
-        Number.isInteger(byIndex) &&
-        byIndex >= 1 &&
-        byIndex <= candidates.length
-      ) {
-        return candidates[byIndex - 1].version;
-      }
-      if (parseSemver(answer)) return answer;
-
-      console.log(`  "${answer}" ist weder eine Auswahl noch eine Version.`);
+      const choice = resolveChoice(answer, candidates, recommendedIndex);
+      if (choice.version) return choice.version;
+      if (choice.abort) die(choice.abort);
+      console.log(
+        `  "${String(answer).trim()}" is neither a choice nor a version.`,
+      );
     }
   } finally {
     rl.close();
@@ -239,9 +178,7 @@ async function chooseVersion() {
 }
 
 const next = requested ?? (await chooseVersion());
-const nextSemver = parseSemver(next);
-if (!nextSemver)
-  die(`"${next}" is not a plain semver version (major.minor.patch)`);
+const nextSemver = parseSemverOrDie(next, "version");
 
 if (compareSemver(nextSemver, currentSemver) <= 0) {
   die(`version ${next} must be greater than the current ${current}`);

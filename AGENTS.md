@@ -1,116 +1,120 @@
 # AGENTS.md — opencode-model-hide
 
-npm-Paket `@franiboy/opencode-model-hide`: ein OpenCode-Plugin, das Modelle aus dem
-Picker versteckt und die Auswahl über einen TUI-Dialog verwaltet. Öffentliches
-Repository, öffentliche npm-Registry.
+npm package `@franiboy/opencode-model-hide`: an OpenCode plugin that hides models
+from the picker and manages the selection through a TUI dialog. Public
+repository, public npm registry.
 
 ## Layout
 
 ```
-src/index.ts   Server-Plugin (Bridge-Datei lesen, Modelle filtern, Catalog schreiben)
-src/tui.ts     TUI-Selektor, wird aus dem Server-Plugin heraus geladen
-tests/         Vitest, bootet das echte Plugin-Entrypoint gegen ein minimales ctx
-scripts/       release.mjs, die Release-Transaktion
-model-hide.ts  entfernt (2026-09-29): die Einzeldatei-Variante ist Geschichte,
-               Installation läuft immer über npm
+src/index.ts   Server plugin (read the bridge file, filter models, write the catalog)
+src/tui.ts     TUI selector, loaded from the server plugin
+scripts/       release.mjs and the pure version-choice helpers
+tests/         Vitest; boots the real plugin entrypoint against a minimal ctx
 ```
 
-Das Paket verschifft rohes TypeScript (`exports` zeigt auf `./src/index.ts`).
-Es gibt keinen Build-Schritt und keinen `dist/`.
+The package ships raw TypeScript (`exports` points at `./src/index.ts`). There is
+no build step and no `dist/`. `model-hide.ts`, the single-file variant, was
+removed on 2026-09-29: installation always goes through npm.
 
-## Befehle
+## Commands
 
 ```bash
 npm ci
-npm run check            # format:check + typecheck + test, das ist die CI-Bedingung
-npm run format           # prettier --write .
-npm run release -- 0.1.7        # Release, siehe unten
+npm run check                  # format:check + typecheck + test, this is the CI condition
+npm run format                 # prettier --write .
+npm run release                # asks which version to release, then releases it
+npm run release -- 0.1.7       # same, with the version already decided
 npm run release -- 0.1.7 --dry-run
 ```
 
-Nach jeder Änderung an `src/` gilt: `npm run check` muss grün sein. Der Typecheck
-läuft `strict` gegen das aufgelöste `@opencode/plugin`; genau darin liegt der Wert,
-denkt man an eine paketinterne Änderung an der Plugin-API.
+After every change to `src/`, `npm run check` must be green. The typecheck runs
+`strict` against the resolved `@opencode/plugin`; that is where its value lies,
+because a breaking change in the plugin API shows up there.
 
 ## Release
 
-`npm run release -- <version>` ist die einzige Art, zu veröffentlichen. Die
-Reihenfolge ist die Transaktion und nicht verhandelbar:
+`npm run release` is the only way to publish. Without an explicit version it
+reads the `## [Unreleased]` section of `CHANGELOG.md`, suggests a bump from the
+sections used there, and asks which version to release. The order of operations
+is a transaction and not up for negotiation:
 
-1. Prüfungen — auf `main`, sauberer Baum, `main` deckungsgleich mit `origin/main`,
-   Version größer als die aktuelle, noch nicht auf npm, CI auf HEAD grün, `npm run check`.
-2. `CHANGELOG.md`: der Abschnitt `## [Unreleased]` wird zu `## [<version>] - <datum>`.
-3. `npm version --no-git-tag-version` — bumped `package.json` **und** `package-lock.json`.
-4. Commit `Release v<x.y.z>` und annotierter Tag `v<x.y.z>`, noch lokal.
+1. Checks — on `main`, clean tree, `main` identical to `origin/main`, version
+   greater than the current one, not already on npm, CI green on HEAD, `npm run check`.
+2. `CHANGELOG.md`: `## [Unreleased]` becomes `## [<version>] - <date>`.
+3. `npm version --no-git-tag-version` — bumps `package.json` **and** `package-lock.json`.
+4. Commit `Release v<x.y.z>` and annotated tag `v<x.y.z>`, still local.
 5. `npm publish`.
-6. Erst jetzt der Push: erst `main`, dann der Tag.
+6. Only now the push: first `main`, then the tag.
 
-Warum der Publish **vor** dem Push kommt: der Fehler, den dieses Paket einmal
-hatte, war eine in `package.json` committete und gemeldete Version, die nie
-veröffentlicht wurde (0.1.6 lag so Tage). Ein Commit, der `main` noch nicht
-verlassen hat, kann zurückgerollt werden, ein Tag auf dem Remote nicht.
+Why the publish comes **before** the push: the failure this package already had
+once was a version committed and tagged but never published (0.1.6 sat in that
+state for days). A commit that has not left `main` can be rolled back, a remote
+tag cannot. If `npm publish` fails, the script runs `git reset --hard` and
+deletes the tag — `main` is left exactly as it was, nothing was pushed. **Do
+not** run `npm publish` by hand and then walk away; that is what produces the
+half-finished state.
 
-Schlägt `npm publish` fehl, macht das Skript `git reset --hard` und löscht den Tag
-— `main` bleibt exakt wie vorher, nichts wurde gepusht. **Nicht** mit
-`npm publish` und loslaufen; genau das erzeugt den halben Zustand.
+The release commit is made directly on `main` and skips review on purpose: it
+is mechanical (version bump, lockfile, changelog) and comes from the
+script-checked state. Code changes still go through a PR.
 
-Der Commit des Releases entsteht direkt auf `main` und umgeht ein Review
-bewusst: er ist mechanisch (Versionsbump, Lockfile, Changelog) und entsteht aus
-dem skriptgeprüften Zustand. Codeänderungen gehen weiterhin per PR.
+### The conditions under which the script fails, all of them deliberate
 
-### Bedingungen, an denen das Skript scheitert (bewusst fail-closed)
+- npm has 2FA on writes. `npm publish` prints a URL that has to be confirmed in
+  a browser. An automation token would avoid that but none is configured.
+- A missing `## [Unreleased]` section in the changelog aborts the release. Write
+  the notes first, release second. An _empty_ section is allowed, because a
+  Dependabot bump has nothing to announce.
+- Without a terminal the script cannot ask and says so instead of hanging.
+- `gh` writes API error bodies to **stdout**. The script therefore checks the
+  exit status _and_ the shape of the response, and does not treat an empty list
+  of checks as green.
+- `readline`'s promise form resolves with `undefined` on Node 24.19 before any
+  input arrives, so the prompt uses the callback form.
 
-- `npm` hat 2FA für Schreibzugriffe. `npm publish` gibt eine URL aus, die im Browser
-  zu bestätigen ist. Ein Automation-Token würde das umgehen, ist aber nicht eingerichtet.
-- Fehlender `## [Unreleased]`-Abschnitt im Changelog → Abbruch. Erst die
-  Release-Notes schreiben, dann freigeben.
-- `gh` schreibt API-Fehlerkörper auf **stdout**. Das Skript prüft deshalb den
-  Exit-Status _und_ die Antwortform und wertet eine leere Check-Liste **nicht**
-  als grün.
+## Git tags
 
-## Git-Tags
+`v0.1.1`, `v0.1.2` and `v0.1.3` are missing on purpose and must not be invented
+afterwards. Those three registry versions have byte-identical `src/`, but they
+additionally shipped a `src/probe.ts` that exists in **no** commit. A tag on
+`0c1e0e8` would claim a tree that does not contain that file. `v0.1.4` and
+`v0.1.5` are byte-reproducible and are tagged.
 
-`v0.1.1`, `v0.1.2` und `v0.1.3` fehlen absichtlich und dürfen nicht nachträglich
-erfunden werden. Die drei Registry-Versionen haben byte-identisches `src/`, haben
-aber zusätzlich ein `src/probe.ts` ausgeliefert, das in **keinem** Commit
-existiert. Ein Tag auf `0c1e0e8` würde einen Baum behaupten, der die Datei nicht
-enthält. `v0.1.4` und `v0.1.5` sind exakt rekonstruierbar und getaggt.
+Tags are created by the release script alone. Adding one retroactively is only
+allowed when the published content can be reproduced from a commit byte for byte.
 
-Ein Tag wird ausschließlich vom Release-Skript erzeugt. Nachträglich Tags zu
-setzen ist nur zulässig, wenn der veröffentlichte Inhalt byteweise aus einem
-Commit rekonstruierbar ist.
+## Runtime files
 
-## Runtime-Dateien
+| File                                         | Purpose                                        |
+| -------------------------------------------- | ---------------------------------------------- |
+| `~/.config/opencode/model-hide.json`         | Bridge: `hidden: string[]`, `favorite: string` |
+| `~/.config/opencode/model-hide.catalog.json` | written by the server plugin, read by the TUI  |
 
-| Datei                                        | Zweck                                             |
-| -------------------------------------------- | ------------------------------------------------- |
-| `~/.config/opencode/model-hide.json`         | Bridge: `hidden: string[]`, `favorite: string`    |
-| `~/.config/opencode/model-hide.catalog.json` | wird vom Server-Plugin geschrieben, liest der TUI |
-
-`MODEL_HIDE_BRIDGE_FILE` und `MODEL_HIDE_CATALOG_FILE` überschreiben beide Pfade.
-Keine dieser Dateien gehört je committet oder ins Tarball — der `pack`-Job in der
-CI prüft, dass im npm-Tarball nichts außer `src/`, `README.md`, `LICENSE` und
-`package.json` liegt.
+`MODEL_HIDE_BRIDGE_FILE` and `MODEL_HIDE_CATALOG_FILE` override both paths.
+Neither file may ever be committed or included in the tarball — the `pack` job
+in CI checks that the npm tarball holds nothing beyond `src/`, `README.md`,
+`LICENSE` and `package.json`.
 
 ## CI
 
-`.github/workflows/ci.yml`, zwei Jobs: `check` auf Node 22 und 24
-(Prettier, Typecheck, Vitest) und `pack` (Tarball-Inhalt). Dependabot meldet
-`@opencode/plugin` getrennt von den übrigen devDependencies, weil ein Bruch dort
-die CI rot werden lässt.
+`.github/workflows/ci.yml`, two jobs: `check` on Node 22 and 24 (Prettier,
+typecheck, Vitest) and `pack` (tarball contents). Dependabot reports
+`@opencode/plugin` separately from the other devDependencies, because a break
+there turns CI red.
 
-Kein Branch-Protection-Ruleset und kein Review-Zwang auf diesem Repository. Deshalb
-gilt: **Merges bitte ansagen, nicht ungefragt durchführen.** PRs eröffnen und
-pushed werden ist unproblematisch.
+This repository has no branch protection ruleset and no enforced review. So:
+**ask before merging**, do not merge unprompted. Opening and pushing PRs is
+fine.
 
-## Fallen, die bereits einmal zugeschlagen haben
+## Failure modes that have already bitten here
 
-- Ein Hand-Bump in `package.json` ohne Publish — der Grund für 0.1.6. Das Release-Skript
-  ist die Antwort darauf.
-- Eine handgepflegte Dublette von `src/index.ts` (`model-hide.ts`), die still auf 0.1.5
-  stand, während das Paket 0.1.6 war, und die nicht mal den Typecheck bestand.
-  Sie ist entfernt, statt sie zu synchronisieren.
-- Tests, die nie rot werden, sind wertlos. Die drei Guards in `tests/plugin.test.ts`
-  (verstecktes Favorit, deaktivierte Modelle, kein Rewrite bei gleichem Catalog)
-  wurden einzeln durch Entfernen der jeweiligen Bedingung als fehlschlagend
-  verifiziert. Bei neuen Tests gilt dasselbe.
+- A hand bump in `package.json` without a publish — the reason for 0.1.6. The
+  release script is the answer to that.
+- A hand-maintained duplicate of `src/index.ts` (`model-hide.ts`) that silently
+  stayed on 0.1.5 code while the package was at 0.1.6, and that did not even pass
+  the typecheck. It was removed rather than kept in sync.
+- Tests that never fail are worthless. The three guards in
+  `tests/plugin.test.ts` (hidden favorite, disabled models, no rewrite of an
+  unchanged catalog) were each verified to fail by removing the corresponding
+  condition. New tests owe the same.
