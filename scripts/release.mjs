@@ -218,7 +218,7 @@ run("npm", ["run", "check"]);
 step("changelog");
 const changelogPath = path.join(root, "CHANGELOG.md");
 const changelog = fs.readFileSync(changelogPath, "utf8");
-const unreleasedHeading = /^## \[Unreleased\]\s*$/m;
+const unreleasedHeading = /^## \[Unreleased\][ \t]*$/m;
 if (!unreleasedHeading.test(changelog)) {
   die(
     "CHANGELOG.md has no `## [Unreleased]` section.\n" +
@@ -236,20 +236,22 @@ if (!pending) console.log("  note: the Unreleased section is empty");
 
 const today = new Date().toISOString().slice(0, 10);
 const previous = latestTag?.replace(/^v/, "") ?? current;
-let updated = changelog
-  .replace(unreleasedHeading, `## [Unreleased]\n\n## [next] - ${today}`)
-  .replace(/^## \[next\] - /m, `## [${next}] - `);
+// Only horizontal whitespace above: `\s*$` would swallow the blank line
+// between the heading and the body, and the emitted changelog has to stay
+// prettier-clean or the release commit lands on a red CI.
+let updated = changelog.replace(
+  unreleasedHeading,
+  `## [Unreleased]\n\n## [${next}] - ${today}`,
+);
 
 // Keep the link references truthful: Unreleased now starts at the new tag, and
-// the new version gets a link from the previously released one.
+// the new version gets a link from the previously released one, in the same
+// descending order as the entries already there.
 const base = `https://github.com/${REPO}/compare`;
 updated = updated.replace(
-  new RegExp(`^\\[Unreleased\\]:.*$`, "m"),
-  `[Unreleased]: ${base}/v${next}...HEAD`,
+  /^\[Unreleased\]:.*$/m,
+  `[Unreleased]: ${base}/v${next}...HEAD\n[${next}]: ${base}/v${previous}...v${next}`,
 );
-if (!new RegExp(`^\\[${next.replace(/\./g, "\\.")}\\]:`, "m").test(updated)) {
-  updated = `${updated.trimEnd()}\n[${next}]: ${base}/v${previous}...v${next}\n`;
-}
 fs.writeFileSync(changelogPath, updated);
 
 // ------------------------------------------------------------------ the bump
