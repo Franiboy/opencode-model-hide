@@ -459,15 +459,35 @@ try {
   run("git", ["push", "origin", "main"]);
   run("git", ["push", "origin", `v${next}`]);
 
+  // npm answers `+ pkg@version` before the registry has finished processing:
+  // "Your package is being processed and may take a few minutes to become
+  // available." Reading dist-tags.latest straight away therefore sees the previous
+  // version and turns every successful release into a failure. Measured on
+  // 0.1.6: published at 16:34, latest caught up around 16:38.
   step("verify");
-  const latest = capture("npm", [
-    "view",
-    PKG_NAME,
-    "dist-tags.latest",
-  ]).stdout.trim();
-  if (latest !== next) {
-    die(`published, but dist-tags.latest is "${latest}" instead of "${next}"`);
+  const deadline = Date.now() + 10 * 60 * 1000;
+  let latest = "";
+  for (;;) {
+    latest = capture("npm", [
+      "view",
+      PKG_NAME,
+      "dist-tags.latest",
+    ]).stdout.trim();
+    if (latest === next) break;
+    if (Date.now() > deadline) {
+      die(
+        `published, but after 10 minutes dist-tags.latest is "${latest}" instead of "${next}".\n` +
+          `     The release itself succeeded and is pushed. Re-check with:\n` +
+          `       npm view ${PKG_NAME} dist-tags.latest`,
+      );
+    }
+    if (!latest) latest = "(none)";
+    process.stdout.write(
+      `\r  waiting for npm: latest is ${latest}, retrying...   `,
+    );
+    await new Promise((r) => setTimeout(r, 15_000));
   }
+  process.stdout.write("\r\x1b[K");
 
   console.log(`  npm latest  = ${latest}`);
   console.log(
