@@ -115,8 +115,16 @@ there turns CI red.
 a pull request with **one approving review**, the last pusher not being able to
 approve their own commit, stale reviews dismissed on every new push, all three
 CI checks green and up to date with `main`, and no unresolved conversation.
-Force pushes and branch deletion are off. Merge methods allowed are squash and
-merge, which is what the history actually uses.
+Force pushes and branch deletion are off.
+
+Squash is the **only** merge method: `allow_merge_commit` and
+`allow_rebase_merge` are disabled at the repository level and
+`delete_branch_on_merge` is on, so a merged pull request is squashed and its
+head branch disappears. The older merge commits in the history predate that
+setting and are not a reason to re-enable it. Note that `allowed_merge_methods`
+is silently ignored by this endpoint — it reads back `null` whatever is sent —
+so the merge method is governed by the repository settings above, not by
+branch protection.
 
 **Administrators bypass all of it** (`enforce_admins` is off). That is not an
 oversight, it is the load-bearing part: `npm run release` commits on `main` and
