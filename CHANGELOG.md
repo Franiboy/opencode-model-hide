@@ -46,6 +46,16 @@ published 0.1.6 rather than two.
   enforces this, because `npm run release` copies that section verbatim and never
   compares it against what actually changed.
 
+### Fixed
+
+- The bridge-file watcher no longer misses a change that keeps the file size the
+  same. It compared `mtime:ctime:size` and skipped the reload when that
+  signature was unchanged; because the bridge file holds a few dozen bytes of
+  JSON, two writes in the same millisecond collide on it (194 of 200 in a
+  measured loop). Hiding one model in exchange for another of equal length
+  silently did nothing and the TUI kept the stale list. The watcher now
+  compares file contents.
+
 ### Changed
 
 - `src/index.ts`: the `Plugin.define()` wrapper is replaced by
