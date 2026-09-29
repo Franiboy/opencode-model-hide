@@ -226,40 +226,52 @@ describe("persisted default", () => {
   });
 });
 
+// Both tests below wait for a real fs.watchFile poll (500ms) plus the 250ms
+// debounce in src/index.ts. The per-test timeout has to exceed the waitFor
+// budget, otherwise the test dies at vitest's own deadline instead of
+// reporting the reload that never arrived.
 describe("live reload", () => {
-  it("reloads the model catalog when the bridge file changes", async () => {
-    writeBridge({ hidden: [] });
+  it(
+    "reloads the model catalog when the bridge file changes",
+    { timeout: 30_000 },
+    async () => {
+      writeBridge({ hidden: [] });
 
-    const { getReloads } = await setup();
-    expect(getReloads()).toBe(0);
+      const { getReloads } = await setup();
+      expect(getReloads()).toBe(0);
 
-    fs.writeFileSync(
-      bridgeFile,
-      JSON.stringify({ hidden: ["anthropic/opus-5"] }),
-    );
+      fs.writeFileSync(
+        bridgeFile,
+        JSON.stringify({ hidden: ["anthropic/opus-5"] }),
+      );
 
-    await vi.waitFor(() => expect(getReloads()).toBeGreaterThan(0), {
-      timeout: 10_000,
-      interval: 100,
-    });
-  });
+      await vi.waitFor(() => expect(getReloads()).toBeGreaterThan(0), {
+        timeout: 20_000,
+        interval: 100,
+      });
+    },
+  );
 
-  it("picks up a newly hidden model on the next transform", async () => {
-    writeBridge({ hidden: [] });
-    const first = await setup();
-    expect(first.removed).toEqual([]);
+  it(
+    "picks up a newly hidden model on the next transform",
+    { timeout: 30_000 },
+    async () => {
+      writeBridge({ hidden: [] });
+      const first = await setup();
+      expect(first.removed).toEqual([]);
 
-    fs.writeFileSync(
-      bridgeFile,
-      JSON.stringify({ hidden: ["opencode-go/kimi-k2.6"] }),
-    );
+      fs.writeFileSync(
+        bridgeFile,
+        JSON.stringify({ hidden: ["opencode-go/kimi-k2.6"] }),
+      );
 
-    await vi.waitFor(() => expect(first.getReloads()).toBeGreaterThan(0), {
-      timeout: 10_000,
-      interval: 100,
-    });
+      await vi.waitFor(() => expect(first.getReloads()).toBeGreaterThan(0), {
+        timeout: 20_000,
+        interval: 100,
+      });
 
-    const second = await setup();
-    expect(second.removed).toEqual(["opencode-go/kimi-k2.6"]);
-  });
+      const second = await setup();
+      expect(second.removed).toEqual(["opencode-go/kimi-k2.6"]);
+    },
+  );
 });
